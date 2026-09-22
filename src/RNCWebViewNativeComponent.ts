@@ -246,6 +246,9 @@ export interface NativeProps extends ViewProps {
   webviewDebuggingEnabled?: boolean;
   mediaPlaybackRequiresUserAction?: WithDefault<boolean, true>;
   messagingEnabled: boolean;
+  messagingOriginRules?: ReadonlyArray<string>;
+  nativeProxyEnabled?: boolean;
+  nativeProxyAllowedHosts?: ReadonlyArray<string>;
   onLoadingError: DirectEventHandler<WebViewErrorEvent>;
   onLoadingSubResourceError?: DirectEventHandler<WebViewErrorEvent>;
   onLoadingFinish: DirectEventHandler<WebViewNavigationEvent>;
@@ -285,6 +288,12 @@ export interface NativeCommands {
   ) => void;
   requestFocus: (viewRef: React.ElementRef<HostComponent<NativeProps>>) => void;
   postMessage: (viewRef: React.ElementRef<HostComponent<NativeProps>>, data: string) => void;
+  postWebMessage: (
+    viewRef: React.ElementRef<HostComponent<NativeProps>>,
+    data: string,
+    type: string,
+    targetOrigin: string,
+  ) => void;
   // Android Only
   loadUrl: (viewRef: React.ElementRef<HostComponent<NativeProps>>, url: string) => void;
   clearFormData: (viewRef: React.ElementRef<HostComponent<NativeProps>>) => void;
@@ -305,6 +314,7 @@ export const Commands = codegenNativeCommands<NativeCommands>({
     'injectJavaScript',
     'requestFocus',
     'postMessage',
+    'postWebMessage',
     'loadUrl',
     'clearFormData',
     'clearCache',

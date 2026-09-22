@@ -311,6 +311,7 @@ static inline std::string nullSafeStringWithLength(id value) {
     REMAP_WEBVIEW_PROP(allowsLinkPreview)
     REMAP_WEBVIEW_STRING_PROP(allowingReadAccessToURL)
     REMAP_WEBVIEW_PROP(messagingEnabled)
+    REMAP_WEBVIEW_PROP(nativeProxyEnabled)
     #if !TARGET_OS_OSX
     REMAP_WEBVIEW_PROP(fraudulentWebsiteWarningEnabled)
     #endif // !TARGET_OS_OSX
@@ -422,6 +423,20 @@ static inline std::string nullSafeStringWithLength(id value) {
         }
 
         [_view setSuppressMenuItems:suppressMenuItems];
+    }
+    if (oldViewProps.messagingOriginRules != newViewProps.messagingOriginRules) {
+        NSMutableArray *rules = [NSMutableArray array];
+        for (const auto &rule: newViewProps.messagingOriginRules) {
+            [rules addObject:RCTNSStringFromString(rule)];
+        }
+        [_view setMessagingOriginRules:rules];
+    }
+    if (oldViewProps.nativeProxyAllowedHosts != newViewProps.nativeProxyAllowedHosts) {
+        NSMutableArray *hosts = [NSMutableArray array];
+        for (const auto &host: newViewProps.nativeProxyAllowedHosts) {
+            [hosts addObject:RCTNSStringFromString(host)];
+        }
+        [_view setNativeProxyAllowedHosts:hosts];
     }
     if (oldViewProps.hasOnFileDownload != newViewProps.hasOnFileDownload) {
         if (newViewProps.hasOnFileDownload) {
@@ -545,6 +560,12 @@ Class<RCTComponentViewProtocol> RNCWebViewCls(void)
 
 - (void)postMessage:(nonnull NSString *)data {
     [_view postMessage:data];
+}
+
+- (void)postWebMessage:(nonnull NSString *)data
+                  type:(nonnull NSString *)type
+          targetOrigin:(nonnull NSString *)targetOrigin {
+    [_view postWebMessage:data type:type targetOrigin:targetOrigin];
 }
 
 - (void)reload {

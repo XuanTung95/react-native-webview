@@ -7,6 +7,7 @@ import android.graphics.Color
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
+import android.util.Base64
 import android.util.Log
 import android.view.View
 import android.view.ViewGroup
@@ -16,6 +17,8 @@ import android.webkit.DownloadListener
 import android.webkit.WebSettings
 import android.webkit.WebView
 import androidx.webkit.WebSettingsCompat
+import androidx.webkit.WebMessageCompat
+import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
 import com.facebook.react.bridge.ReadableArray
 import com.facebook.react.bridge.ReadableMap
@@ -561,6 +564,20 @@ open class RNCWebViewManager : ViewGroupManager<RNCWebViewWrapper>(),
         view.webView.setMessagingEnabled(value)
     }
 
+    override fun setMessagingOriginRules(view: RNCWebViewWrapper, value: ReadableArray?) {
+        val rules = value?.toArrayList()?.mapNotNull { it as? String }
+        view.webView.setMessagingOriginRules(rules)
+    }
+
+    override fun setNativeProxyEnabled(view: RNCWebViewWrapper, value: Boolean) {
+        view.webView.setNativeProxyEnabled(value)
+    }
+
+    override fun setNativeProxyAllowedHosts(view: RNCWebViewWrapper, value: ReadableArray?) {
+        val hosts = value?.toArrayList()?.mapNotNull { it as? String }
+        view.webView.setNativeProxyAllowedHosts(hosts)
+    }
+
     @ReactProp(name = "messagingModuleName")
     override fun setMessagingModuleName(view: RNCWebViewWrapper, value: String?) {
         view.webView.messagingModuleName = value
@@ -775,6 +792,49 @@ open class RNCWebViewManager : ViewGroupManager<RNCWebViewWrapper>(),
             )
         } catch (e: JSONException) {
             throw RuntimeException(e)
+        }
+    }
+
+    override fun postWebMessage(
+        view: RNCWebViewWrapper,
+        data: String,
+        type: String,
+        targetOrigin: String,
+    ) {
+        val webView = view.webView
+        val origin = Uri.parse(targetOrigin)
+        if (
+            type == "arrayBuffer" &&
+                WebViewFeature.isFeatureSupported(WebViewFeature.POST_WEB_MESSAGE) &&
+                WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_ARRAY_BUFFER)
+        ) {
+            try {
+                val bytes = Base64.decode(data, Base64.DEFAULT)
+                WebViewCompat.postWebMessage(webView, WebMessageCompat(bytes), origin)
+                return
+            } catch (error: IllegalArgumentException) {
+                Log.w(TAG, "Invalid Base64 passed to postWebMessage; using the JavaScript fallback.", error)
+            }
+        } else if (
+            type == "string" &&
+                WebViewFeature.isFeatureSupported(WebViewFeature.POST_WEB_MESSAGE)
+        ) {
+            WebViewCompat.postWebMessage(webView, WebMessageCompat(data), origin)
+            return
+        }
+
+        if (type == "arrayBuffer") {
+            val encodedData = JSONObject.quote(data)
+            webView.evaluateJavascriptWithFallback(
+                "(function(){" +
+                    "var raw=atob(" + encodedData + ");" +
+                    "var bytes=new Uint8Array(raw.length);" +
+                    "for(var i=0;i<raw.length;i++){bytes[i]=raw.charCodeAt(i);}" +
+                    "window.dispatchEvent(new MessageEvent('message',{data:bytes.buffer}));" +
+                    "})();true;"
+            )
+        } else {
+            postMessage(view, data)
         }
     }
 

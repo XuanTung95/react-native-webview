@@ -6,6 +6,7 @@
  */
 
 #import "RNCWebViewImpl.h"
+#import "RNCWebViewNativeProxy.h"
 #import <React/RCTConvert.h>
 #import <React/RCTAutoInsetsProtocol.h>
 #import "RNCWKProcessPoolManager.h"
@@ -24,6 +25,70 @@ static NSURLCredential* clientAuthenticationCredential;
 static NSDictionary* customCertificatesForHost;
 
 NSString *const CUSTOM_SELECTOR = @"_CUSTOM_SELECTOR_";
+
+static BOOL RNCOriginHostMatches(NSString *host, NSString *pattern)
+{
+  NSString *normalizedHost = host.lowercaseString;
+  NSString *normalizedPattern = pattern.lowercaseString;
+  if ([normalizedPattern isEqualToString:@"*"] || [normalizedHost isEqualToString:normalizedPattern]) {
+    return YES;
+  }
+  if ([normalizedPattern hasPrefix:@"*."]) {
+    NSString *suffix = [normalizedPattern substringFromIndex:1];
+    NSString *base = [normalizedPattern substringFromIndex:2];
+    return [normalizedHost isEqualToString:base] || [normalizedHost hasSuffix:suffix];
+  }
+  return NO;
+}
+
+static BOOL RNCOriginIsAllowed(WKSecurityOrigin *origin, NSArray<NSString *> *rules)
+{
+  NSArray<NSString *> *effectiveRules = rules.count > 0 ? rules : @[@"*"];
+  NSString *protocol = origin.protocol.lowercaseString ?: @"";
+  NSString *host = origin.host.lowercaseString ?: @"";
+  NSInteger port = origin.port;
+  for (NSString *rawRule in effectiveRules) {
+    NSString *rule = [rawRule.lowercaseString stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if ([rule isEqualToString:@"*"]) {
+      return YES;
+    }
+    NSURLComponents *components = [NSURLComponents componentsWithString:rule];
+    if (components.host.length > 0) {
+      if (components.scheme.length > 0 && ![components.scheme.lowercaseString isEqualToString:protocol]) {
+        continue;
+      }
+      if (components.port != nil && components.port.integerValue != port) {
+        continue;
+      }
+      if (RNCOriginHostMatches(host, components.host)) {
+        return YES;
+      }
+    } else if (RNCOriginHostMatches(host, rule)) {
+      return YES;
+    }
+  }
+  return NO;
+}
+
+static BOOL RNCTargetOriginMatchesURL(NSString *targetOrigin, NSURL *url)
+{
+  if (targetOrigin.length == 0 || [targetOrigin isEqualToString:@"*"]) {
+    return YES;
+  }
+  NSURLComponents *target = [NSURLComponents componentsWithString:targetOrigin];
+  NSURLComponents *current = url == nil ? nil : [NSURLComponents componentsWithURL:url resolvingAgainstBaseURL:NO];
+  if (target.host.length == 0 || current.host.length == 0 ||
+      ![target.scheme.lowercaseString isEqualToString:current.scheme.lowercaseString] ||
+      ![target.host.lowercaseString isEqualToString:current.host.lowercaseString]) {
+    return NO;
+  }
+  NSNumber *targetPort = target.port;
+  NSNumber *currentPort = current.port;
+  NSInteger defaultTargetPort = [target.scheme.lowercaseString isEqualToString:@"https"] ? 443 : 80;
+  NSInteger defaultCurrentPort = [current.scheme.lowercaseString isEqualToString:@"https"] ? 443 : 80;
+  return (targetPort ?: @(defaultTargetPort)).integerValue ==
+    (currentPort ?: @(defaultCurrentPort)).integerValue;
+}
 
 #if TARGET_OS_IOS
 // runtime trick to remove WKWebView keyboard default toolbar
@@ -178,6 +243,9 @@ RCTAutoInsetsProtocol>
     _injectedJavaScriptForMainFrameOnly = YES;
     _injectedJavaScriptBeforeContentLoaded = nil;
     _injectedJavaScriptBeforeContentLoadedForMainFrameOnly = YES;
+    _messagingOriginRules = @[@"*"];
+    _nativeProxyEnabled = NO;
+    _nativeProxyAllowedHosts = @[];
     _enableApplePay = NO;
 #if !TARGET_OS_OSX
     // Match the codegen prop defaults: with Fabric, updateProps only runs a
@@ -752,6 +820,16 @@ RCTAutoInsetsProtocol>
       _onLoadingFinish(event);
     }
   } else if ([message.name isEqualToString:MessageHandlerName]) {
+    if (!RNCOriginIsAllowed(message.frameInfo.securityOrigin, _messagingOriginRules)) {
+      return;
+    }
+    if (_nativeProxyEnabled &&
+        [RNCWebViewNativeProxy tryHandleMessage:message.body
+                                       webView:_webView
+                                         owner:self
+                                  allowedHosts:_nativeProxyAllowedHosts]) {
+      return;
+    }
     if (_onMessage) {
       NSMutableDictionary<NSString *, id> *event = [self baseEvent];
       [event addEntriesFromDictionary: @{@"data": message.body}];
@@ -1086,6 +1164,33 @@ RCTAutoInsetsProtocol>
                       RCTJSONStringify(eventInitDict, NULL)
   ];
   [self injectJavaScript: source];
+}
+
+- (void)postWebMessage:(NSString *)data
+                  type:(NSString *)type
+          targetOrigin:(NSString *)targetOrigin
+{
+  if (!RNCTargetOriginMatchesURL(targetOrigin, _webView.URL)) {
+    return;
+  }
+  NSString *source;
+  if ([type isEqualToString:@"arrayBuffer"]) {
+    NSData *decoded = [[NSData alloc] initWithBase64EncodedString:data ?: @""
+                                                         options:NSDataBase64DecodingIgnoreUnknownCharacters];
+    if (decoded == nil) {
+      RCTLogWarn(@"Invalid Base64 passed to postWebMessage.");
+      return;
+    }
+    NSString *base64 = [decoded base64EncodedStringWithOptions:0];
+    source = [NSString stringWithFormat:
+      @"(function(){var r=atob(%@);var b=new Uint8Array(r.length);for(var i=0;i<r.length;i++)b[i]=r.charCodeAt(i);window.dispatchEvent(new MessageEvent('message',{data:b.buffer,origin:window.location.origin}));})();true;",
+      RCTJSONStringify(base64, NULL)];
+  } else {
+    source = [NSString stringWithFormat:
+      @"window.dispatchEvent(new MessageEvent('message',{data:%@,origin:window.location.origin}));true;",
+      RCTJSONStringify(data ?: @"", NULL)];
+  }
+  [self injectJavaScript:source];
 }
 
 - (void)layoutSubviews

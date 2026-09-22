@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 
 import type NativeWebViewComponent from './RNCWebViewNativeComponent';
+import type { InAppWebViewJavaScriptHandlers } from './InAppWebViewBridge';
 
 type WebViewCommands =
   | 'goForward'
@@ -383,6 +384,17 @@ export interface WindowsWebViewProps extends WebViewSharedProps {
 }
 
 export interface IOSWebViewProps extends WebViewSharedProps {
+  /**
+   * iOS compatibility bridge for JavaScript written for
+   * `flutter_inappwebview.callHandler(name, ...args)`.
+   */
+  inAppWebViewJavaScriptHandlers?: InAppWebViewJavaScriptHandlers;
+  /** Origins allowed to send messages through the compatibility bridge. */
+  messagingOriginRules?: readonly string[];
+  /** iOS native handler for `sendToApp({cmd: 'proxy'})`. */
+  nativeProxyEnabled?: boolean;
+  /** Exact hosts or `*.suffix` rules accepted by the iOS native proxy. */
+  nativeProxyAllowedHosts?: readonly string[];
   /**
    * Does not store any data within the lifetime of the WebView.
    */
@@ -948,6 +960,24 @@ export interface MacOSWebViewProps extends WebViewSharedProps {
 }
 
 export interface AndroidWebViewProps extends WebViewSharedProps {
+  /**
+   * Android compatibility bridge for JavaScript written for
+   * `flutter_inappwebview.callHandler(name, ...args)`.
+   *
+   * Handler results, including Promises, resolve or reject the Promise returned
+   * inside the WebView. Defining this prop enables WebView messaging even when
+   * `onMessage` is not supplied.
+   */
+  inAppWebViewJavaScriptHandlers?: InAppWebViewJavaScriptHandlers;
+  /**
+   * AndroidX WebMessage origin rules used by `window.ReactNativeWebView`.
+   * Defaults to `['*']` for backwards compatibility.
+   */
+  messagingOriginRules?: readonly string[];
+  /** Android native handler for `sendToApp({cmd: 'proxy'})`. */
+  nativeProxyEnabled?: boolean;
+  /** Exact hosts or `*.suffix` rules accepted by the Android native proxy. */
+  nativeProxyAllowedHosts?: readonly string[];
   onNavigationStateChange?: (event: WebViewNavigation) => void;
   onContentSizeChange?: (event: WebViewEvent) => void;
 

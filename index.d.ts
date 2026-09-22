@@ -1,5 +1,6 @@
 import { Component } from 'react';
 import { IOSWebViewProps, AndroidWebViewProps, WindowsWebViewProps } from './lib/WebViewTypes';
+import type { CallAsyncJavaScriptOptions, PostWebMessage } from './lib/InAppWebViewBridge';
 
 export { FileDownload, WebViewMessageEvent, WebViewNavigation } from './lib/WebViewTypes';
 
@@ -43,6 +44,20 @@ declare class WebView<P = {}> extends Component<WebViewProps & P> {
    * Posts a message to WebView.
    */
   postMessage: (message: string) => void;
+
+  /**
+   * Android and iOS. Executes an async JavaScript function body and resolves its
+   * returned JSON-compatible value.
+   */
+  callAsyncJavaScript: <T = unknown>(
+    functionBody: string,
+    options?: CallAsyncJavaScriptOptions,
+  ) => Promise<T>;
+
+  /**
+   * Android and iOS. Posts a string or Base64-encoded ArrayBuffer to the page.
+   */
+  postWebMessage: (message: PostWebMessage) => void;
 
   /**
    * (Android only)

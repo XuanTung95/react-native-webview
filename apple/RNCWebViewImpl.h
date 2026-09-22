@@ -69,6 +69,9 @@ shouldStartLoadForRequest:(NSMutableDictionary<NSString *, id> *)request
 @property (nonatomic, weak) id<RNCWebViewDelegate> _Nullable delegate;
 @property (nonatomic, copy) NSDictionary * _Nullable source;
 @property (nonatomic, assign) BOOL messagingEnabled;
+@property (nonatomic, copy) NSArray<NSString *> *messagingOriginRules;
+@property (nonatomic, assign) BOOL nativeProxyEnabled;
+@property (nonatomic, copy) NSArray<NSString *> *nativeProxyAllowedHosts;
 @property (nonatomic, copy) NSString * _Nullable injectedJavaScript;
 @property (nonatomic, copy) NSString * _Nullable injectedJavaScriptBeforeContentLoaded;
 @property (nonatomic, assign) BOOL injectedJavaScriptForMainFrameOnly;
@@ -137,6 +140,9 @@ shouldStartLoadForRequest:(NSMutableDictionary<NSString *, id> *)request
 + (void)setClientAuthenticationCredential:(nullable NSURLCredential*)credential;
 + (void)setCustomCertificatesForHost:(nullable NSDictionary *)certificates;
 - (void)postMessage:(NSString *_Nullable)message;
+- (void)postWebMessage:(NSString *_Nullable)data
+                  type:(NSString *_Nullable)type
+          targetOrigin:(NSString *_Nullable)targetOrigin;
 - (void)injectJavaScript:(NSString *_Nullable)script;
 - (void)goForward;
 - (void)goBack;

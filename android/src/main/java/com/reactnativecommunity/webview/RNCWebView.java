@@ -58,6 +58,9 @@ public class RNCWebView extends WebView implements LifecycleEventListener {
     RNCWebViewBridge fallbackBridge;
     protected @Nullable
     WebViewCompat.WebMessageListener bridgeListener = null;
+    protected Set<String> messagingOriginRules = Set.of("*");
+    protected boolean nativeProxyEnabled = false;
+    protected Set<String> nativeProxyAllowedHosts = Set.of();
 
     /**
      * android.webkit.WebChromeClient fundamentally does not support JS injection into frames other
@@ -260,7 +263,7 @@ public class RNCWebView extends WebView implements LifecycleEventListener {
             WebViewCompat.addWebMessageListener(
               webView,
               JAVASCRIPT_INTERFACE,
-              Set.of("*"),
+              messagingOriginRules,
               this.bridgeListener
             );
           }
@@ -296,6 +299,31 @@ public class RNCWebView extends WebView implements LifecycleEventListener {
         }
     }
 
+    public void setMessagingOriginRules(@Nullable List<String> originRules) {
+        Set<String> nextRules = originRules == null || originRules.isEmpty()
+                ? Set.of("*")
+                : Set.copyOf(originRules);
+        if (messagingOriginRules.equals(nextRules)) {
+            return;
+        }
+        messagingOriginRules = nextRules;
+        if (bridgeListener != null && WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) {
+            WebViewCompat.removeWebMessageListener(this, JAVASCRIPT_INTERFACE);
+            bridgeListener = null;
+            if (messagingEnabled) {
+                createRNCWebViewBridge(this);
+            }
+        }
+    }
+
+    public void setNativeProxyEnabled(boolean enabled) {
+        nativeProxyEnabled = enabled;
+    }
+
+    public void setNativeProxyAllowedHosts(@Nullable List<String> allowedHosts) {
+        nativeProxyAllowedHosts = allowedHosts == null ? Set.of() : Set.copyOf(allowedHosts);
+    }
+
     protected void evaluateJavascriptWithFallback(String script) {
         evaluateJavascript(script, null);
     }
@@ -326,6 +354,9 @@ public class RNCWebView extends WebView implements LifecycleEventListener {
     }
 
     public void onMessage(String message, String sourceUrl) {
+        if (nativeProxyEnabled && RNCWebViewNativeProxy.tryHandle(this, message, nativeProxyAllowedHosts)) {
+            return;
+        }
         ThemedReactContext reactContext = getThemedReactContext();
         RNCWebView mWebView = this;
 

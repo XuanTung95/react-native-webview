@@ -34,6 +34,14 @@ import {
   type WebViewMessageEvent,
   type ShouldStartLoadRequestEvent,
 } from './WebViewTypes';
+import {
+  buildCallAsyncJavaScriptScript,
+  buildHandlerResolutionScript,
+  buildInAppWebViewBridgeBootstrap,
+  parseInAppWebViewBridgeEnvelope,
+  type CallAsyncJavaScriptOptions,
+  type PostWebMessage,
+} from './InAppWebViewBridge';
 
 import styles from './WebView.styles';
 
@@ -80,6 +88,10 @@ const WebViewComponent = forwardRef<unknown, AndroidWebViewProps>(
       onHttpError: onHttpErrorProp,
       onRenderProcessGone: onRenderProcessGoneProp,
       onMessage: onMessageProp,
+      inAppWebViewJavaScriptHandlers,
+      messagingOriginRules,
+      nativeProxyEnabled,
+      nativeProxyAllowedHosts,
       onOpenWindow: onOpenWindowProp,
       renderLoading,
       renderError,
@@ -89,6 +101,8 @@ const WebViewComponent = forwardRef<unknown, AndroidWebViewProps>(
       nativeConfig,
       onShouldStartLoadWithRequest: onShouldStartLoadWithRequestProp,
       injectedJavaScriptObject,
+      injectedJavaScript,
+      injectedJavaScriptBeforeContentLoaded,
       ...otherProps
     },
     ref,
@@ -96,6 +110,87 @@ const WebViewComponent = forwardRef<unknown, AndroidWebViewProps>(
     const id = useId();
     const messagingModuleName = `WebViewMessageHandler${id}`;
     const webViewRef = useRef<React.ComponentRef<HostComponent<NativeProps>> | null>(null);
+    const compatibilityBridgeEnabled =
+      inAppWebViewJavaScriptHandlers !== undefined || nativeProxyEnabled === true;
+    const asyncRequestCounter = useRef(1);
+    const asyncRequests = useRef(
+      new Map<
+        number,
+        {
+          resolve: (value: unknown) => void;
+          reject: (reason: Error) => void;
+          timeout: ReturnType<typeof setTimeout>;
+        }
+      >(),
+    );
+    const bridgeOnMessage = useCallback(
+      (event: WebViewMessageEvent) => {
+        const envelope = parseInAppWebViewBridgeEnvelope(event.nativeEvent.data);
+        if (!envelope) {
+          onMessageProp?.(event);
+          return;
+        }
+        if (envelope.type === 'async-result') {
+          const pending = asyncRequests.current.get(envelope.id);
+          if (!pending) return;
+          asyncRequests.current.delete(envelope.id);
+          clearTimeout(pending.timeout);
+          if (envelope.ok) pending.resolve(envelope.value);
+          else pending.reject(new Error(String(envelope.error ?? 'JavaScript execution failed.')));
+          return;
+        }
+        const handler = inAppWebViewJavaScriptHandlers?.[envelope.handlerName];
+        if (!handler) {
+          if (webViewRef.current) {
+            Commands.injectJavaScript(
+              webViewRef.current,
+              buildHandlerResolutionScript(
+                envelope.id,
+                false,
+                `JavaScript handler '${envelope.handlerName}' is not registered.`,
+              ),
+            );
+          }
+          return;
+        }
+        Promise.resolve()
+          .then(() => handler(...envelope.args))
+          .then(
+            (value) => {
+              if (webViewRef.current) {
+                Commands.injectJavaScript(
+                  webViewRef.current,
+                  buildHandlerResolutionScript(envelope.id, true, value),
+                );
+              }
+            },
+            (error) => {
+              if (webViewRef.current) {
+                Commands.injectJavaScript(
+                  webViewRef.current,
+                  buildHandlerResolutionScript(
+                    envelope.id,
+                    false,
+                    error instanceof Error ? error.message : String(error),
+                  ),
+                );
+              }
+            },
+          );
+      },
+      [inAppWebViewJavaScriptHandlers, onMessageProp],
+    );
+
+    useEffect(
+      () => () => {
+        asyncRequests.current.forEach((request) => {
+          clearTimeout(request.timeout);
+          request.reject(new Error('WebView was unmounted.'));
+        });
+        asyncRequests.current.clear();
+      },
+      [],
+    );
 
     const onShouldStartLoadWithRequestCallback = useCallback(
       (shouldStart: boolean, url: string, lockIdentifier?: number) => {
@@ -132,7 +227,7 @@ const WebViewComponent = forwardRef<unknown, AndroidWebViewProps>(
       onLoadProgress,
       onLoadStart,
       onRenderProcessGoneProp,
-      onMessageProp,
+      onMessageProp: bridgeOnMessage,
       onOpenWindowProp,
       startInLoadingState,
       originWhitelist,
@@ -154,6 +249,44 @@ const WebViewComponent = forwardRef<unknown, AndroidWebViewProps>(
         stopLoading: () => webViewRef.current && Commands.stopLoading(webViewRef.current),
         postMessage: (data: string) =>
           webViewRef.current && Commands.postMessage(webViewRef.current, data),
+        postWebMessage: (message: PostWebMessage) =>
+          webViewRef.current &&
+          Commands.postWebMessage(
+            webViewRef.current,
+            message.data,
+            message.type ?? 'string',
+            message.targetOrigin ?? '',
+          ),
+        callAsyncJavaScript: <T,>(
+          functionBody: string,
+          options: CallAsyncJavaScriptOptions = {},
+        ): Promise<T> => {
+          if (!webViewRef.current) {
+            return Promise.reject(new Error('WebView is not attached.'));
+          }
+          const requestId = asyncRequestCounter.current;
+          asyncRequestCounter.current += 1;
+          const timeoutMs = Math.max(1, options.timeoutMs ?? 20_000);
+          let script: string;
+          try {
+            script = buildCallAsyncJavaScriptScript(requestId, functionBody, options.arguments);
+          } catch (error) {
+            return Promise.reject(error);
+          }
+          const result = new Promise<T>((resolve, reject) => {
+            const timeout = setTimeout(() => {
+              asyncRequests.current.delete(requestId);
+              reject(new Error(`Async JavaScript request ${requestId} timed out.`));
+            }, timeoutMs);
+            asyncRequests.current.set(requestId, {
+              resolve: (value) => resolve(value as T),
+              reject,
+              timeout,
+            });
+          });
+          Commands.injectJavaScript(webViewRef.current, script);
+          return result;
+        },
         injectJavaScript: (data: string) =>
           webViewRef.current && Commands.injectJavaScript(webViewRef.current, data),
         requestFocus: () => webViewRef.current && Commands.requestFocus(webViewRef.current),
@@ -257,8 +390,11 @@ const WebViewComponent = forwardRef<unknown, AndroidWebViewProps>(
         // the codegen spec types it as a Double, so forwarding the "normal" /
         // "fast" string shortcuts would throw during Fabric prop conversion.
         decelerationRate={undefined}
-        messagingEnabled={typeof onMessageProp === 'function'}
+        messagingEnabled={typeof onMessageProp === 'function' || compatibilityBridgeEnabled}
         messagingModuleName={messagingModuleName}
+        messagingOriginRules={messagingOriginRules}
+        nativeProxyEnabled={nativeProxyEnabled}
+        nativeProxyAllowedHosts={nativeProxyAllowedHosts}
         hasOnScroll={!!otherProps.onScroll}
         onLoadingError={onLoadingError}
         onLoadingSubResourceError={onLoadingSubResourceError}
@@ -288,6 +424,12 @@ const WebViewComponent = forwardRef<unknown, AndroidWebViewProps>(
         setDisplayZoomControls={setDisplayZoomControls}
         nestedScrollEnabled={nestedScrollEnabled}
         injectedJavaScriptObject={JSON.stringify(injectedJavaScriptObject)}
+        injectedJavaScript={`${
+          compatibilityBridgeEnabled ? buildInAppWebViewBridgeBootstrap() : ''
+        }\n${injectedJavaScript ?? ''}`}
+        injectedJavaScriptBeforeContentLoaded={`${
+          compatibilityBridgeEnabled ? buildInAppWebViewBridgeBootstrap() : ''
+        }\n${injectedJavaScriptBeforeContentLoaded ?? ''}`}
         {...nativeConfig?.props}
       />
     );
