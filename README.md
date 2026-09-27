@@ -68,6 +68,8 @@ For more, read the [API Reference](./docs/Reference.md) and [Guide](./docs/Guide
 This fork also provides opt-in Flutter InAppWebView compatibility layers for
 [Android](./docs/Flutter-InAppWebView-Android.md) and
 [iOS](./docs/Flutter-InAppWebView-iOS.md).
+It also supports [native-owned headless WebViews](./docs/Headless-WebView.md)
+on iOS and Android without mounting a React component.
 
 ### Common issues
 

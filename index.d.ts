@@ -1,6 +1,25 @@
 import { Component } from 'react';
+export { HeadlessWebView } from './lib/HeadlessWebView';
+export type {
+  HeadlessWebViewOptions,
+  HeadlessWebViewSize,
+  HeadlessWebViewSource,
+  HeadlessWebViewEvent,
+} from './lib/HeadlessWebView';
 import { IOSWebViewProps, AndroidWebViewProps, WindowsWebViewProps } from './lib/WebViewTypes';
-import type { CallAsyncJavaScriptOptions, PostWebMessage } from './lib/InAppWebViewBridge';
+import type {
+  CallAsyncJavaScriptOptions,
+  JavaScriptEvaluationOptions,
+  PostWebMessage,
+} from './lib/InAppWebViewBridge';
+import type { InAppWebViewJavaScriptHandler } from './lib/InAppWebViewBridge';
+
+export type {
+  CallAsyncJavaScriptOptions,
+  JavaScriptEvaluationOptions,
+  InAppWebViewJavaScriptHandler,
+  InAppWebViewJavaScriptHandlers,
+} from './lib/InAppWebViewBridge';
 
 export { FileDownload, WebViewMessageEvent, WebViewNavigation } from './lib/WebViewTypes';
 
@@ -35,6 +54,12 @@ declare class WebView<P = {}> extends Component<WebViewProps & P> {
    */
   injectJavaScript: (script: string) => void;
 
+  /** iOS and Android. Returns the native evaluation result; does not await JS Promises. */
+  evaluateJavascript: <T = unknown>(
+    source: string,
+    options?: JavaScriptEvaluationOptions,
+  ) => Promise<T>;
+
   /**
    * Focuses on WebView rendered page.
    */
@@ -53,6 +78,9 @@ declare class WebView<P = {}> extends Component<WebViewProps & P> {
     functionBody: string,
     options?: CallAsyncJavaScriptOptions,
   ) => Promise<T>;
+
+  addJavaScriptHandler: (name: string, callback: InAppWebViewJavaScriptHandler) => void;
+  removeJavaScriptHandler: (name: string) => void;
 
   /**
    * Android and iOS. Posts a string or Base64-encoded ArrayBuffer to the page.

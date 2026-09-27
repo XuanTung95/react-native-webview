@@ -48,6 +48,45 @@ describe('InAppWebViewBridge', () => {
     ).toBeUndefined();
   });
 
+  test('normalizes iOS native numeric booleans so evaluation results settle', () => {
+    const success = parseInAppWebViewBridgeEnvelope(
+      JSON.stringify({
+        kind: IN_APP_WEBVIEW_BRIDGE_KIND,
+        type: 'async-result',
+        id: 7,
+        ok: 1,
+        value: { title: 'Example Domain', answer: 42 },
+      }),
+    );
+    expect(success).toMatchObject({ type: 'async-result', id: 7, ok: true, value: { answer: 42 } });
+
+    const failure = parseInAppWebViewBridgeEnvelope(
+      JSON.stringify({
+        kind: IN_APP_WEBVIEW_BRIDGE_KIND,
+        type: 'async-result',
+        id: 8,
+        ok: 0,
+        error: 'execution failed',
+      }),
+    );
+    expect(failure).toMatchObject({
+      type: 'async-result',
+      id: 8,
+      ok: false,
+      error: 'execution failed',
+    });
+    expect(
+      parseInAppWebViewBridgeEnvelope(
+        JSON.stringify({
+          kind: IN_APP_WEBVIEW_BRIDGE_KIND,
+          type: 'async-result',
+          id: 9,
+          ok: '1',
+        }),
+      ),
+    ).toBeUndefined();
+  });
+
   test('generates the Flutter-compatible Promise bridge', () => {
     const script = buildInAppWebViewBridgeBootstrap();
     expect(script).toContain('window.flutter_inappwebview');

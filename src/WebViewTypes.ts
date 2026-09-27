@@ -965,8 +965,8 @@ export interface AndroidWebViewProps extends WebViewSharedProps {
    * `flutter_inappwebview.callHandler(name, ...args)`.
    *
    * Handler results, including Promises, resolve or reject the Promise returned
-   * inside the WebView. Defining this prop enables WebView messaging even when
-   * `onMessage` is not supplied.
+   * inside the WebView. The Flutter-compatible bridge is automatically enabled
+   * even when this prop and `onMessage` are not supplied.
    */
   inAppWebViewJavaScriptHandlers?: InAppWebViewJavaScriptHandlers;
   /**

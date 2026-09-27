@@ -278,6 +278,13 @@ export interface NativeProps extends ViewProps {
 }
 
 export interface NativeCommands {
+  executeJavaScript: (
+    viewRef: React.ElementRef<HostComponent<NativeProps>>,
+    requestId: Double,
+    source: string,
+    argumentsJSON: string,
+    asynchronous: boolean,
+  ) => void;
   goBack: (viewRef: React.ElementRef<HostComponent<NativeProps>>) => void;
   goForward: (viewRef: React.ElementRef<HostComponent<NativeProps>>) => void;
   reload: (viewRef: React.ElementRef<HostComponent<NativeProps>>) => void;
@@ -312,6 +319,7 @@ export const Commands = codegenNativeCommands<NativeCommands>({
     'reload',
     'stopLoading',
     'injectJavaScript',
+    'executeJavaScript',
     'requestFocus',
     'postMessage',
     'postWebMessage',

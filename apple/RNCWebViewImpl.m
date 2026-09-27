@@ -623,7 +623,7 @@ RCTAutoInsetsProtocol>
     [self addSubview:_webView];
     [self setHideKeyboardAccessoryView: _savedHideKeyboardAccessoryView];
     [self setKeyboardDisplayRequiresUserAction: _savedKeyboardDisplayRequiresUserAction];
-    [self visitSource];
+    if (!_deferInitialLoad) [self visitSource];
   }
 
 #if !TARGET_OS_OSX
@@ -1656,6 +1656,56 @@ didFinishNavigation:(WKNavigation *)navigation
         [[NSHTTPCookieStorage sharedHTTPCookieStorage] setCookie:cookie];
       }
     }];
+  }
+}
+
+// Both mounted and headless controllers receive results through their existing event sink.
+- (void)emitJavaScriptResult:(double)requestId value:(id)value error:(NSError *)error
+{
+  NSMutableDictionary *result = [@{@"kind": @"__rnc_inappwebview_bridge__", @"type": @"async-result",
+    @"id": @(requestId), @"ok": (__bridge id)(error ? kCFBooleanFalse : kCFBooleanTrue)} mutableCopy];
+  if (error) result[@"error"] = error.userInfo[@"WKJavaScriptExceptionMessage"] ?: error.localizedDescription;
+  else result[@"value"] = value ?: NSNull.null;
+  NSError *serializationError = nil;
+  NSData *json = [NSJSONSerialization isValidJSONObject:result]
+    ? [NSJSONSerialization dataWithJSONObject:result options:0 error:&serializationError] : nil;
+  if (!json) {
+    result[@"ok"] = (__bridge id)kCFBooleanFalse;
+    [result removeObjectForKey:@"value"];
+    result[@"error"] = serializationError.localizedDescription ?: @"JavaScript result is not JSON-compatible.";
+    json = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
+  }
+  if (_onMessage && json) {
+    NSMutableDictionary *event = [self baseEvent];
+    event[@"data"] = [[NSString alloc] initWithData:json encoding:NSUTF8StringEncoding];
+    _onMessage(event);
+  }
+}
+
+- (void)executeJavaScript:(double)requestId source:(NSString *)source argumentsJSON:(NSString *)argumentsJSON asynchronous:(BOOL)asynchronous
+{
+  if (!_webView) {
+    [self emitJavaScriptResult:requestId value:nil error:[NSError errorWithDomain:@"RNCWebView" code:1 userInfo:@{NSLocalizedDescriptionKey: @"WebView is not attached."}]];
+    return;
+  }
+  __weak RNCWebViewImpl *weakSelf = self;
+  void (^completion)(id, NSError *) = ^(id value, NSError *error) {
+    [weakSelf emitJavaScriptResult:requestId value:value error:error];
+  };
+  if (!asynchronous) {
+    [_webView evaluateJavaScript:source completionHandler:completion];
+    return;
+  }
+  NSError *error = nil;
+  id arguments = [NSJSONSerialization JSONObjectWithData:[argumentsJSON dataUsingEncoding:NSUTF8StringEncoding] options:0 error:&error];
+  if (![arguments isKindOfClass:NSDictionary.class]) {
+    completion(nil, error ?: [NSError errorWithDomain:@"RNCWebView" code:2 userInfo:@{NSLocalizedDescriptionKey: @"Invalid JavaScript arguments."}]);
+    return;
+  }
+  if (@available(iOS 14.3, macOS 11.0, *)) {
+    [_webView callAsyncJavaScript:source arguments:arguments inFrame:nil inContentWorld:WKContentWorld.pageWorld completionHandler:completion];
+  } else {
+    completion(nil, [NSError errorWithDomain:@"RNCWebView" code:3 userInfo:@{NSLocalizedDescriptionKey: @"Native async JavaScript requires iOS 14.3 or macOS 11."}]);
   }
 }
 

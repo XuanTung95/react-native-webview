@@ -18,6 +18,7 @@ import android.webkit.WebViewClient;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.webkit.JavaScriptReplyProxy;
+import androidx.webkit.ScriptHandler;
 import androidx.webkit.WebMessageCompat;
 import androidx.webkit.WebViewCompat;
 import androidx.webkit.WebViewFeature;
@@ -43,6 +44,9 @@ import com.reactnativecommunity.webview.events.TopMessageEvent;
 
 import org.json.JSONException;
 import org.json.JSONObject;
+import org.json.JSONTokener;
+import java.util.Iterator;
+import java.util.ArrayList;
 
 import java.util.List;
 import java.util.Map;
@@ -324,6 +328,71 @@ public class RNCWebView extends WebView implements LifecycleEventListener {
         nativeProxyAllowedHosts = allowedHosts == null ? Set.of() : Set.copyOf(allowedHosts);
     }
 
+    private ScriptHandler documentStartScript;
+
+    public void setInjectedJSBeforeContentLoaded(@Nullable String script) {
+        injectedJSBeforeContentLoaded = script;
+        if (documentStartScript != null) {
+            documentStartScript.remove();
+            documentStartScript = null;
+        }
+        if (script != null && !script.isEmpty() && WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
+            // Match the existing main-frame injection behavior. Native messaging is installed first.
+            documentStartScript = WebViewCompat.addDocumentStartJavaScript(this,
+                "if (window === window.top) { (function() {\n" + script + "\n})(); }", Set.of("*"));
+        }
+    }
+
+    private void emitJavaScriptResult(double id, Object value, String error) {
+        try {
+            JSONObject result = new JSONObject();
+            result.put("kind", "__rnc_inappwebview_bridge__");
+            result.put("type", "async-result");
+            result.put("id", id);
+            result.put("ok", error == null);
+            result.put(error == null ? "value" : "error", error == null ? (value == null ? JSONObject.NULL : value) : error);
+            onMessage(result.toString(), getUrl());
+        } catch (JSONException exception) {
+            throw new IllegalStateException(exception);
+        }
+    }
+
+    public void executeJavaScript(double id, String source, String argumentsJSON, boolean asynchronous) {
+        if (!getSettings().getJavaScriptEnabled()) {
+            emitJavaScriptResult(id, null, "JavaScript is disabled.");
+            return;
+        }
+        if (!asynchronous) {
+            // Android supplies a JSON-encoded result directly, independently of page messaging.
+            evaluateJavascript(source, raw -> {
+                try { emitJavaScriptResult(id, raw == null ? JSONObject.NULL : new JSONTokener(raw).nextValue(), null); }
+                catch (JSONException error) { emitJavaScriptResult(id, null, error.getMessage()); }
+            });
+            return;
+        }
+        try {
+            JSONObject arguments = new JSONObject(argumentsJSON);
+            ArrayList<String> names = new ArrayList<>();
+            ArrayList<String> values = new ArrayList<>();
+            for (Iterator<String> keys = arguments.keys(); keys.hasNext();) {
+                String key = keys.next();
+                // Public TS API also rejects reserved words before dispatching this command.
+                if (!key.matches("[$A-Za-z_][$A-Za-z_0-9]*")) throw new IllegalArgumentException("Invalid JavaScript argument name.");
+                names.add(key);
+                values.add("args[" + JSONObject.quote(key) + "]");
+            }
+            String script = "(function(args) { (async function(" + TextUtils.join(",", names) + ") {\n" + source +
+                "\n}).call(window" + (values.isEmpty() ? "" : "," + TextUtils.join(",", values)) + ")" +
+                ".then(function(value) { window.ReactNativeWebView.postMessage(JSON.stringify({kind:'__rnc_inappwebview_bridge__',type:'async-result',id:" + id + ",ok:true,value:value == null ? null : value})); })" +
+                ".catch(function(error) { window.ReactNativeWebView.postMessage(JSON.stringify({kind:'__rnc_inappwebview_bridge__',type:'async-result',id:" + id + ",ok:false,error:String(error)})); }); })(" + argumentsJSON + "); true;";
+            evaluateJavascript(script, started -> {
+                if (!"true".equals(started)) emitJavaScriptResult(id, null, "Could not start async JavaScript. Check function syntax and arguments.");
+            });
+        } catch (Exception error) {
+            emitJavaScriptResult(id, null, error.getMessage());
+        }
+    }
+
     protected void evaluateJavascriptWithFallback(String script) {
         evaluateJavascript(script, null);
     }
@@ -338,7 +407,7 @@ public class RNCWebView extends WebView implements LifecycleEventListener {
     }
 
     public void callInjectedJavaScriptBeforeContentLoaded() {
-        if (getSettings().getJavaScriptEnabled() &&
+        if (documentStartScript == null && getSettings().getJavaScriptEnabled() &&
                 injectedJSBeforeContentLoaded != null &&
                 !TextUtils.isEmpty(injectedJSBeforeContentLoaded)) {
             evaluateJavascriptWithFallback("(function() {\n" + injectedJSBeforeContentLoaded + ";\n})();");
@@ -449,6 +518,10 @@ public class RNCWebView extends WebView implements LifecycleEventListener {
 
     @Override
     public void destroy() {
+        if (documentStartScript != null) {
+            documentStartScript.remove();
+            documentStartScript = null;
+        }
         if (mWebChromeClient != null) {
             mWebChromeClient.onHideCustomView();
         }

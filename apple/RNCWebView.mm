@@ -550,6 +550,10 @@ Class<RCTComponentViewProtocol> RNCWebViewCls(void)
     [_view goForward];
 }
 
+- (void)executeJavaScript:(double)requestId source:(nonnull NSString *)source argumentsJSON:(nonnull NSString *)argumentsJSON asynchronous:(BOOL)asynchronous {
+    [_view executeJavaScript:requestId source:source argumentsJSON:argumentsJSON asynchronous:asynchronous];
+}
+
 - (void)injectJavaScript:(nonnull NSString *)javascript {
     [_view injectJavaScript:javascript];
 }

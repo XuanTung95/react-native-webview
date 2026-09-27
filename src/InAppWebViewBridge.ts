@@ -6,6 +6,8 @@ export type InAppWebViewJavaScriptHandlers = Readonly<
   Record<string, InAppWebViewJavaScriptHandler>
 >;
 
+export type JavaScriptEvaluationOptions = Readonly<{ timeoutMs?: number }>;
+
 export type CallAsyncJavaScriptOptions = Readonly<{
   /** Values exposed as named parameters inside the async function body. */
   arguments?: Readonly<Record<string, unknown>>;
@@ -25,6 +27,7 @@ type BridgeCallEnvelope = Readonly<{
   id: number;
   handlerName: string;
   args: unknown[];
+  documentId?: string;
 }>;
 
 type AsyncResultEnvelope = Readonly<{
@@ -59,29 +62,31 @@ export function parseInAppWebViewBridgeEnvelope(
   ) {
     return envelope as unknown as BridgeCallEnvelope;
   }
-  if (envelope.type === 'async-result' && typeof envelope.ok === 'boolean') {
-    return envelope as unknown as AsyncResultEnvelope;
+  if (envelope.type === 'async-result') {
+    if (typeof envelope.ok === 'boolean') return envelope as unknown as AsyncResultEnvelope;
+    // Older iOS builds serialized NSNumber boolean values as JSON 0/1.
+    if (envelope.ok === 0 || envelope.ok === 1) {
+      return { ...envelope, ok: envelope.ok === 1 } as AsyncResultEnvelope;
+    }
   }
   return undefined;
 }
 
 function javaScriptValue(value: unknown): string {
-  let serialized: string | undefined;
-  try {
-    serialized = JSON.stringify(value ?? null);
-  } catch {
-    serialized = JSON.stringify(String(value));
-  }
-  return (serialized ?? 'null').replaceAll('\u2028', '\\u2028').replaceAll('\u2029', '\\u2029');
+  const serialized = JSON.stringify(value ?? null);
+  if (serialized === undefined) throw new Error('JavaScript bridge value is not JSON-compatible.');
+  return serialized.replaceAll('\u2028', '\\u2028').replaceAll('\u2029', '\\u2029');
 }
 
 export function buildInAppWebViewBridgeBootstrap(): string {
   return `
 (function () {
+  if (!window.ReactNativeWebView || typeof window.ReactNativeWebView.postMessage !== 'function') return false;
   var bridge = window.flutter_inappwebview = window.flutter_inappwebview || {};
   if (bridge.__rncBridgeInstalled === true) return true;
   bridge.__rncBridgeInstalled = true;
   bridge.__rncBridgeCounter = 1;
+  bridge.__rncDocumentId = Date.now().toString(36) + Math.random().toString(36).slice(2);
   bridge.__rncBridgePending = new Map();
   bridge.__rncBridgeResolve = function (id, ok, value) {
     var pending = bridge.__rncBridgePending.get(id);
@@ -100,6 +105,7 @@ export function buildInAppWebViewBridgeBootstrap(): string {
           kind: '${IN_APP_WEBVIEW_BRIDGE_KIND}',
           type: 'handler-call',
           id: id,
+          documentId: bridge.__rncDocumentId,
           handlerName: String(handlerName),
           args: args
         }));
@@ -109,14 +115,33 @@ export function buildInAppWebViewBridgeBootstrap(): string {
       }
     });
   };
+  bridge._platformReady = true;
+  window.dispatchEvent(new Event('flutterInAppWebViewPlatformReady'));
   return true;
 })();
 true;
 `;
 }
 
-export function buildHandlerResolutionScript(id: number, ok: boolean, value: unknown): string {
-  return `window.flutter_inappwebview && window.flutter_inappwebview.__rncBridgeResolve(${id}, ${ok}, ${javaScriptValue(value)}); true;`;
+export function buildHandlerResolutionScript(
+  id: number,
+  ok: boolean,
+  value: unknown,
+  documentId?: string,
+): string {
+  const guard =
+    documentId === undefined
+      ? ''
+      : `window.flutter_inappwebview.__rncDocumentId === ${javaScriptValue(documentId)} && `;
+  let encodedValue: string;
+  let success = ok;
+  try {
+    encodedValue = javaScriptValue(value);
+  } catch (error) {
+    success = false;
+    encodedValue = javaScriptValue(`Cannot serialize JavaScript handler result: ${String(error)}`);
+  }
+  return `window.flutter_inappwebview && ${guard}window.flutter_inappwebview.__rncBridgeResolve(${id}, ${success}, ${encodedValue}); true;`;
 }
 
 const RESERVED_WORDS = new Set([
@@ -168,11 +193,7 @@ const RESERVED_WORDS = new Set([
   'yield',
 ]);
 
-export function buildCallAsyncJavaScriptScript(
-  id: number,
-  functionBody: string,
-  args: Readonly<Record<string, unknown>> = {},
-): string {
+export function validateJavaScriptArguments(args: Readonly<Record<string, unknown>>): void {
   const names = Object.keys(args);
   const invalidName = names.find(
     (name) => !/^[$A-Z_a-z][$\w]*$/.test(name) || RESERVED_WORDS.has(name),
@@ -180,6 +201,15 @@ export function buildCallAsyncJavaScriptScript(
   if (invalidName) {
     throw new Error(`Invalid async JavaScript argument name '${invalidName}'.`);
   }
+}
+
+export function buildCallAsyncJavaScriptScript(
+  id: number,
+  functionBody: string,
+  args: Readonly<Record<string, unknown>> = {},
+): string {
+  validateJavaScriptArguments(args);
+  const names = Object.keys(args);
   const values = names.map((name) => `args[${javaScriptValue(name)}]`).join(', ');
   return `
 (async function () {

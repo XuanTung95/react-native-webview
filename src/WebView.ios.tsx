@@ -14,14 +14,16 @@ import {
 import { IOSWebViewProps, DecelerationRateConstant, WebViewSourceUri } from './WebViewTypes';
 import type { WebViewMessageEvent } from './WebViewTypes';
 import {
-  buildCallAsyncJavaScriptScript,
   buildHandlerResolutionScript,
   buildInAppWebViewBridgeBootstrap,
   parseInAppWebViewBridgeEnvelope,
   type CallAsyncJavaScriptOptions,
+  type JavaScriptEvaluationOptions,
+  type InAppWebViewJavaScriptHandler,
   type PostWebMessage,
 } from './InAppWebViewBridge';
 
+import { JavaScriptRequests, serializeJavaScriptArguments } from './JavaScriptRequests';
 import styles from './WebView.styles';
 
 const resolveAssetSource = (source: ImageSourcePropType) => Image.resolveAssetSource(source);
@@ -98,18 +100,33 @@ const WebViewComponent = forwardRef<unknown, IOSWebViewProps>(
     ref,
   ) => {
     const webViewRef = useRef<React.ComponentRef<HostComponent<NativeProps>> | null>(null);
-    const compatibilityBridgeEnabled =
-      inAppWebViewJavaScriptHandlers !== undefined || nativeProxyEnabled === true;
-    const asyncRequestCounter = useRef(1);
-    const asyncRequests = useRef(
-      new Map<
-        number,
-        {
-          resolve: (value: unknown) => void;
-          reject: (reason: Error) => void;
-          timeout: ReturnType<typeof setTimeout>;
+    const dynamicHandlers = useRef(new Map<string, InAppWebViewJavaScriptHandler>());
+    const navigation = useRef(0);
+    const asyncRequests = useRef(new JavaScriptRequests());
+    const cancelRequests = useCallback((reason: string) => {
+      navigation.current += 1;
+      asyncRequests.current.cancel(reason);
+    }, []);
+    const execute = useCallback(
+      <T,>(
+        source: string,
+        asynchronous: boolean,
+        options: CallAsyncJavaScriptOptions = {},
+      ): Promise<T> => {
+        const view = webViewRef.current;
+        if (!view) return Promise.reject(new Error('WebView is not attached.'));
+        let args: string;
+        try {
+          args = serializeJavaScriptArguments(options.arguments);
+        } catch (error) {
+          return Promise.reject(error);
         }
-      >(),
+        return asyncRequests.current.run<T>(
+          (id) => Commands.executeJavaScript(view, id, source, args, asynchronous),
+          options,
+        );
+      },
+      [],
     );
     const bridgeOnMessage = useCallback(
       (event: WebViewMessageEvent) => {
@@ -119,15 +136,17 @@ const WebViewComponent = forwardRef<unknown, IOSWebViewProps>(
           return;
         }
         if (envelope.type === 'async-result') {
-          const pending = asyncRequests.current.get(envelope.id);
-          if (!pending) return;
-          asyncRequests.current.delete(envelope.id);
-          clearTimeout(pending.timeout);
-          if (envelope.ok) pending.resolve(envelope.value);
-          else pending.reject(new Error(String(envelope.error ?? 'JavaScript execution failed.')));
+          asyncRequests.current.finish(
+            envelope.id,
+            envelope.ok,
+            envelope.ok ? envelope.value : envelope.error,
+          );
           return;
         }
-        const handler = inAppWebViewJavaScriptHandlers?.[envelope.handlerName];
+        const document = navigation.current;
+        const handler =
+          dynamicHandlers.current.get(envelope.handlerName) ??
+          inAppWebViewJavaScriptHandlers?.[envelope.handlerName];
         if (!handler) {
           if (webViewRef.current) {
             Commands.injectJavaScript(
@@ -136,6 +155,7 @@ const WebViewComponent = forwardRef<unknown, IOSWebViewProps>(
                 envelope.id,
                 false,
                 `JavaScript handler '${envelope.handlerName}' is not registered.`,
+                envelope.documentId,
               ),
             );
           }
@@ -145,21 +165,22 @@ const WebViewComponent = forwardRef<unknown, IOSWebViewProps>(
           .then(() => handler(...envelope.args))
           .then(
             (value) => {
-              if (webViewRef.current) {
+              if (webViewRef.current && document === navigation.current) {
                 Commands.injectJavaScript(
                   webViewRef.current,
-                  buildHandlerResolutionScript(envelope.id, true, value),
+                  buildHandlerResolutionScript(envelope.id, true, value, envelope.documentId),
                 );
               }
             },
             (error) => {
-              if (webViewRef.current) {
+              if (webViewRef.current && document === navigation.current) {
                 Commands.injectJavaScript(
                   webViewRef.current,
                   buildHandlerResolutionScript(
                     envelope.id,
                     false,
                     error instanceof Error ? error.message : String(error),
+                    envelope.documentId,
                   ),
                 );
               }
@@ -169,16 +190,7 @@ const WebViewComponent = forwardRef<unknown, IOSWebViewProps>(
       [inAppWebViewJavaScriptHandlers, onMessageProp],
     );
 
-    useEffect(
-      () => () => {
-        asyncRequests.current.forEach((request) => {
-          clearTimeout(request.timeout);
-          request.reject(new Error('WebView was unmounted.'));
-        });
-        asyncRequests.current.clear();
-      },
-      [],
-    );
+    useEffect(() => () => cancelRequests('WebView was unmounted.'), [cancelRequests]);
 
     const onShouldStartLoadWithRequestCallback = useCallback(
       (shouldStart: boolean, _url: string, lockIdentifier = 0) => {
@@ -220,6 +232,12 @@ const WebViewComponent = forwardRef<unknown, IOSWebViewProps>(
     useImperativeHandle(
       ref,
       () => ({
+        addJavaScriptHandler: (name: string, callback: InAppWebViewJavaScriptHandler) => {
+          dynamicHandlers.current.set(name, callback);
+        },
+        removeJavaScriptHandler: (name: string) => {
+          dynamicHandlers.current.delete(name);
+        },
         goForward: () => webViewRef.current && Commands.goForward(webViewRef.current),
         goBack: () => webViewRef.current && Commands.goBack(webViewRef.current),
         reload: () => {
@@ -239,43 +257,17 @@ const WebViewComponent = forwardRef<unknown, IOSWebViewProps>(
             message.type ?? 'string',
             message.targetOrigin ?? '',
           ),
-        callAsyncJavaScript: <T,>(
-          functionBody: string,
-          options: CallAsyncJavaScriptOptions = {},
-        ): Promise<T> => {
-          if (!webViewRef.current) {
-            return Promise.reject(new Error('WebView is not attached.'));
-          }
-          const requestId = asyncRequestCounter.current;
-          asyncRequestCounter.current += 1;
-          const timeoutMs = Math.max(1, options.timeoutMs ?? 20_000);
-          let script: string;
-          try {
-            script = buildCallAsyncJavaScriptScript(requestId, functionBody, options.arguments);
-          } catch (error) {
-            return Promise.reject(error);
-          }
-          const result = new Promise<T>((resolve, reject) => {
-            const timeout = setTimeout(() => {
-              asyncRequests.current.delete(requestId);
-              reject(new Error(`Async JavaScript request ${requestId} timed out.`));
-            }, timeoutMs);
-            asyncRequests.current.set(requestId, {
-              resolve: (value) => resolve(value as T),
-              reject,
-              timeout,
-            });
-          });
-          Commands.injectJavaScript(webViewRef.current, script);
-          return result;
-        },
+        evaluateJavascript: <T,>(source: string, options: JavaScriptEvaluationOptions = {}) =>
+          execute<T>(source, false, options),
+        callAsyncJavaScript: <T,>(body: string, options: CallAsyncJavaScriptOptions = {}) =>
+          execute<T>(body, true, options),
         injectJavaScript: (data: string) =>
           webViewRef.current && Commands.injectJavaScript(webViewRef.current, data),
         requestFocus: () => webViewRef.current && Commands.requestFocus(webViewRef.current),
         clearCache: (includeDiskFiles: boolean) =>
           webViewRef.current && Commands.clearCache(webViewRef.current, includeDiskFiles),
       }),
-      [setViewState, webViewRef],
+      [setViewState, webViewRef, execute],
     );
 
     useWarnIfChanges(allowsInlineMediaPlayback, 'allowsInlineMediaPlayback');
@@ -339,7 +331,7 @@ const WebViewComponent = forwardRef<unknown, IOSWebViewProps>(
         useSharedProcessPool={useSharedProcessPool}
         textInteractionEnabled={textInteractionEnabled}
         decelerationRate={decelerationRate}
-        messagingEnabled={typeof onMessageProp === 'function' || compatibilityBridgeEnabled}
+        messagingEnabled={true}
         messagingModuleName="" // android ONLY
         messagingOriginRules={messagingOriginRules}
         nativeProxyEnabled={nativeProxyEnabled}
@@ -348,19 +340,21 @@ const WebViewComponent = forwardRef<unknown, IOSWebViewProps>(
         onLoadingFinish={onLoadingFinish}
         onLoadingProgress={onLoadingProgress}
         onFileDownload={onFileDownload}
-        onLoadingStart={onLoadingStart}
+        onLoadingStart={(event) => {
+          cancelRequests('WebView navigated to another document.');
+          onLoadingStart(event);
+        }}
         onHttpError={onHttpError}
         onMessage={onMessage}
         onOpenWindow={onOpenWindowProp && onOpenWindow}
         hasOnOpenWindowEvent={onOpenWindowProp !== undefined}
         onShouldStartLoadWithRequest={onShouldStartLoadWithRequest}
-        onContentProcessDidTerminate={onContentProcessDidTerminate}
-        injectedJavaScript={`${
-          compatibilityBridgeEnabled ? buildInAppWebViewBridgeBootstrap() : ''
-        }\n${injectedJavaScript ?? ''}`}
-        injectedJavaScriptBeforeContentLoaded={`${
-          compatibilityBridgeEnabled ? buildInAppWebViewBridgeBootstrap() : ''
-        }\n${injectedJavaScriptBeforeContentLoaded ?? ''}`}
+        onContentProcessDidTerminate={(event) => {
+          cancelRequests('WebView process terminated.');
+          onContentProcessDidTerminate(event);
+        }}
+        injectedJavaScript={`${buildInAppWebViewBridgeBootstrap()}\n${injectedJavaScript ?? ''}`}
+        injectedJavaScriptBeforeContentLoaded={`${buildInAppWebViewBridgeBootstrap()}\n${injectedJavaScriptBeforeContentLoaded ?? ''}`}
         injectedJavaScriptForMainFrameOnly={injectedJavaScriptForMainFrameOnly}
         injectedJavaScriptBeforeContentLoadedForMainFrameOnly={
           injectedJavaScriptBeforeContentLoadedForMainFrameOnly

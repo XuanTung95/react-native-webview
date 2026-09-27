@@ -25,6 +25,10 @@ import android.widget.Toast;
 
 import com.facebook.react.bridge.ActivityEventListener;
 import com.facebook.react.bridge.ReactApplicationContext;
+import com.facebook.react.bridge.Arguments;
+import com.facebook.react.bridge.Promise;
+import com.facebook.react.bridge.UiThreadUtil;
+import com.facebook.react.bridge.WritableMap;
 import com.facebook.react.module.annotations.ReactModule;
 import com.facebook.react.modules.core.PermissionAwareActivity;
 import com.facebook.react.modules.core.PermissionListener;
@@ -47,6 +51,7 @@ public class RNCWebViewModule extends NativeRNCWebViewModuleSpec implements Acti
     public static final int FILE_DOWNLOAD_PERMISSION_REQUEST = 1;
 
     final private ReactApplicationContext mContext;
+    private final RNCHeadlessWebViewManager headless;
 
     private DownloadManager.Request mDownloadRequest;
 
@@ -58,6 +63,41 @@ public class RNCWebViewModule extends NativeRNCWebViewModuleSpec implements Acti
         super(reactContext);
         mContext = reactContext;
         reactContext.addActivityEventListener(this);
+        headless = new RNCHeadlessWebViewManager(reactContext, (id, type, data) -> {
+            if (!reactContext.hasActiveReactInstance()) return;
+            WritableMap event = Arguments.createMap();
+            event.putString("id", id);
+            event.putString("type", type);
+            event.putString("data", data);
+            emitOnHeadlessEvent(event);
+        });
+    }
+
+    @Override public void createHeadless(String id, String options, Promise promise) {
+        UiThreadUtil.runOnUiThread(() -> {
+            try { headless.create(id, options); promise.resolve(null); }
+            catch (Exception error) { promise.reject("E_HEADLESS_CREATE", error); }
+        });
+    }
+
+    @Override public void disposeHeadless(String id, Promise promise) {
+        UiThreadUtil.runOnUiThread(() -> {
+            headless.dispose(id);
+            promise.resolve(null);
+        });
+    }
+
+    @Override public void commandHeadless(String id, String command, String payload, Promise promise) {
+        UiThreadUtil.runOnUiThread(() -> {
+            try { promise.resolve(headless.command(id, command, payload)); }
+            catch (Exception error) { promise.reject("E_HEADLESS_COMMAND", error); }
+        });
+    }
+
+    @Override public void invalidate() {
+        mContext.removeActivityEventListener(this);
+        UiThreadUtil.runOnUiThread(headless::invalidate);
+        super.invalidate();
     }
 
     @NonNull

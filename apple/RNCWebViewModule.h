@@ -7,7 +7,7 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
-@interface RNCWebViewModule : NSObject <NativeRNCWebViewModuleSpec>
+@interface RNCWebViewModule : NativeRNCWebViewModuleSpecBase <NativeRNCWebViewModuleSpec>
 @end
 
 NS_ASSUME_NONNULL_END

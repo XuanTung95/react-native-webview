@@ -54,20 +54,22 @@ shouldStartLoadForRequest:(NSMutableDictionary<NSString *, id> *)request
 
 
 @property (nonatomic, copy) RCTDirectEventBlock onFileDownload;
-@property (nonatomic, copy) RCTDirectEventBlock onLoadingStart;
-@property (nonatomic, copy) RCTDirectEventBlock onLoadingFinish;
-@property (nonatomic, copy) RCTDirectEventBlock onLoadingError;
-@property (nonatomic, copy) RCTDirectEventBlock onLoadingProgress;
+@property (nonatomic, copy, nullable) RCTDirectEventBlock onLoadingStart;
+@property (nonatomic, copy, nullable) RCTDirectEventBlock onLoadingFinish;
+@property (nonatomic, copy, nullable) RCTDirectEventBlock onLoadingError;
+@property (nonatomic, copy, nullable) RCTDirectEventBlock onLoadingProgress;
 @property (nonatomic, copy) RCTDirectEventBlock onShouldStartLoadWithRequest;
-@property (nonatomic, copy) RCTDirectEventBlock onHttpError;
-@property (nonatomic, copy) RCTDirectEventBlock onMessage;
+@property (nonatomic, copy, nullable) RCTDirectEventBlock onHttpError;
+@property (nonatomic, copy, nullable) RCTDirectEventBlock onMessage;
 @property (nonatomic, copy) RCTDirectEventBlock onScroll;
-@property (nonatomic, copy) RCTDirectEventBlock onContentProcessDidTerminate;
+@property (nonatomic, copy, nullable) RCTDirectEventBlock onContentProcessDidTerminate;
 @property (nonatomic, copy) RCTDirectEventBlock onOpenWindow;
 
 
 @property (nonatomic, weak) id<RNCWebViewDelegate> _Nullable delegate;
 @property (nonatomic, copy) NSDictionary * _Nullable source;
+/** Native owners may create the view before submitting their first source. */
+@property (nonatomic, assign) BOOL deferInitialLoad;
 @property (nonatomic, assign) BOOL messagingEnabled;
 @property (nonatomic, copy) NSArray<NSString *> *messagingOriginRules;
 @property (nonatomic, assign) BOOL nativeProxyEnabled;
@@ -144,6 +146,7 @@ shouldStartLoadForRequest:(NSMutableDictionary<NSString *, id> *)request
                   type:(NSString *_Nullable)type
           targetOrigin:(NSString *_Nullable)targetOrigin;
 - (void)injectJavaScript:(NSString *_Nullable)script;
+- (void)executeJavaScript:(double)requestId source:(NSString *)source argumentsJSON:(NSString *)argumentsJSON asynchronous:(BOOL)asynchronous;
 - (void)goForward;
 - (void)goBack;
 - (void)reload;

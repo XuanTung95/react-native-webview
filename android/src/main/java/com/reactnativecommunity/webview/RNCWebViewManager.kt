@@ -504,7 +504,7 @@ open class RNCWebViewManager : ViewGroupManager<RNCWebViewWrapper>(),
 
     @ReactProp(name = "injectedJavaScriptBeforeContentLoaded")
     override fun setInjectedJavaScriptBeforeContentLoaded(view: RNCWebViewWrapper, value: String?) {
-        view.webView.injectedJSBeforeContentLoaded = value
+        view.webView.setInjectedJSBeforeContentLoaded(value)
     }
 
     @ReactProp(name = "injectedJavaScriptForMainFrameOnly")
@@ -763,6 +763,10 @@ open class RNCWebViewManager : ViewGroupManager<RNCWebViewWrapper>(),
 
     override fun stopLoading(view: RNCWebViewWrapper) {
         view.webView.stopLoading()
+    }
+
+    override fun executeJavaScript(view: RNCWebViewWrapper, requestId: Double, source: String, argumentsJSON: String, asynchronous: Boolean) {
+        view.webView.executeJavaScript(requestId, source, argumentsJSON, asynchronous)
     }
 
     override fun injectJavaScript(view: RNCWebViewWrapper, javascript: String) {
