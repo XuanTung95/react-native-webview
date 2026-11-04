@@ -1256,6 +1256,12 @@ export interface WebViewSharedProps extends ViewProps {
   onMessage?: (event: WebViewMessageEvent) => void;
 
   /**
+   * Named JSON handlers called with window.ReactNativeWebView.callHandler(name, ...args).
+   * Return a JSON-serializable value (or Promise). Android, iOS and macOS; main frame only.
+   */
+  javaScriptHandlers?: Record<string, (...args: unknown[]) => unknown | Promise<unknown>>;
+
+  /**
    * Function that is invoked when the `WebView` is loading.
    */
   onLoadProgress?: (event: WebViewProgressEvent) => void;

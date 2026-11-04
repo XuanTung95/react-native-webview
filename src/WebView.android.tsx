@@ -1,3 +1,4 @@
+import { useJavaScriptHandlers } from './WebViewJavaScriptHandlers';
 import React, {
   forwardRef,
   ReactElement,
@@ -79,7 +80,8 @@ const WebViewComponent = forwardRef<unknown, AndroidWebViewProps>(
       onLoadProgress,
       onHttpError: onHttpErrorProp,
       onRenderProcessGone: onRenderProcessGoneProp,
-      onMessage: onMessageProp,
+      onMessage: originalOnMessage,
+      javaScriptHandlers,
       onOpenWindow: onOpenWindowProp,
       renderLoading,
       renderError,
@@ -89,6 +91,8 @@ const WebViewComponent = forwardRef<unknown, AndroidWebViewProps>(
       nativeConfig,
       onShouldStartLoadWithRequest: onShouldStartLoadWithRequestProp,
       injectedJavaScriptObject,
+      injectedJavaScript,
+      injectedJavaScriptBeforeContentLoaded,
       ...otherProps
     },
     ref,
@@ -96,6 +100,11 @@ const WebViewComponent = forwardRef<unknown, AndroidWebViewProps>(
     const id = useId();
     const messagingModuleName = `WebViewMessageHandler${id}`;
     const webViewRef = useRef<React.ComponentRef<HostComponent<NativeProps>> | null>(null);
+
+    const bridge = useJavaScriptHandlers(javaScriptHandlers, originalOnMessage, (script) => {
+      if (webViewRef.current) Commands.injectJavaScript(webViewRef.current, script);
+    });
+    const onMessageProp = bridge.onMessage;
 
     const onShouldStartLoadWithRequestCallback = useCallback(
       (shouldStart: boolean, url: string, lockIdentifier?: number) => {
@@ -287,6 +296,10 @@ const WebViewComponent = forwardRef<unknown, AndroidWebViewProps>(
         setBuiltInZoomControls={setBuiltInZoomControls}
         setDisplayZoomControls={setDisplayZoomControls}
         nestedScrollEnabled={nestedScrollEnabled}
+        injectedJavaScript={bridge.script + (injectedJavaScript || '')}
+        injectedJavaScriptBeforeContentLoaded={
+          bridge.script + (injectedJavaScriptBeforeContentLoaded || '')
+        }
         injectedJavaScriptObject={JSON.stringify(injectedJavaScriptObject)}
         {...nativeConfig?.props}
       />

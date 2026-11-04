@@ -1,3 +1,4 @@
+import { useJavaScriptHandlers } from './WebViewJavaScriptHandlers';
 import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useRef } from 'react';
 import { Image, View, ImageSourcePropType, HostComponent } from 'react-native';
 import invariant from 'invariant';
@@ -63,7 +64,8 @@ const WebViewComponent = forwardRef<unknown, IOSWebViewProps>(
       onContentProcessDidTerminate: onContentProcessDidTerminateProp,
       onFileDownload,
       onHttpError: onHttpErrorProp,
-      onMessage: onMessageProp,
+      onMessage: originalOnMessage,
+      javaScriptHandlers,
       onOpenWindow: onOpenWindowProp,
       renderLoading,
       renderError,
@@ -85,6 +87,11 @@ const WebViewComponent = forwardRef<unknown, IOSWebViewProps>(
     ref,
   ) => {
     const webViewRef = useRef<React.ComponentRef<HostComponent<NativeProps>> | null>(null);
+
+    const bridge = useJavaScriptHandlers(javaScriptHandlers, originalOnMessage, (script) => {
+      if (webViewRef.current) Commands.injectJavaScript(webViewRef.current, script);
+    });
+    const onMessageProp = bridge.onMessage;
 
     const onShouldStartLoadWithRequestCallback = useCallback(
       (shouldStart: boolean, _url: string, lockIdentifier = 0) => {
@@ -220,8 +227,10 @@ const WebViewComponent = forwardRef<unknown, IOSWebViewProps>(
         hasOnOpenWindowEvent={onOpenWindowProp !== undefined}
         onShouldStartLoadWithRequest={onShouldStartLoadWithRequest}
         onContentProcessDidTerminate={onContentProcessDidTerminate}
-        injectedJavaScript={injectedJavaScript}
-        injectedJavaScriptBeforeContentLoaded={injectedJavaScriptBeforeContentLoaded}
+        injectedJavaScript={bridge.script + (injectedJavaScript || '')}
+        injectedJavaScriptBeforeContentLoaded={
+          bridge.script + (injectedJavaScriptBeforeContentLoaded || '')
+        }
         injectedJavaScriptForMainFrameOnly={injectedJavaScriptForMainFrameOnly}
         injectedJavaScriptBeforeContentLoadedForMainFrameOnly={
           injectedJavaScriptBeforeContentLoadedForMainFrameOnly

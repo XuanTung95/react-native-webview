@@ -1,3 +1,4 @@
+import { useJavaScriptHandlers } from './WebViewJavaScriptHandlers';
 import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useRef } from 'react';
 import { Image, View, ImageSourcePropType, HostComponent } from 'react-native';
 import invariant from 'invariant';
@@ -44,7 +45,8 @@ const WebViewComponent = forwardRef<unknown, MacOSWebViewProps>(
       onLoadEnd,
       onLoadProgress,
       onHttpError: onHttpErrorProp,
-      onMessage: onMessageProp,
+      onMessage: originalOnMessage,
+      javaScriptHandlers,
       renderLoading,
       renderError,
       style,
@@ -62,6 +64,11 @@ const WebViewComponent = forwardRef<unknown, MacOSWebViewProps>(
     ref,
   ) => {
     const webViewRef = useRef<React.ComponentRef<HostComponent<NativeProps>> | null>(null);
+
+    const bridge = useJavaScriptHandlers(javaScriptHandlers, originalOnMessage, (script) => {
+      if (webViewRef.current) Commands.injectJavaScript(webViewRef.current, script);
+    });
+    const onMessageProp = bridge.onMessage;
 
     const onShouldStartLoadWithRequestCallback = useCallback(
       (shouldStart: boolean, _url: string, lockIdentifier = 0) => {
@@ -186,8 +193,10 @@ const WebViewComponent = forwardRef<unknown, MacOSWebViewProps>(
         onMessage={onMessage}
         onShouldStartLoadWithRequest={onShouldStartLoadWithRequest}
         onContentProcessDidTerminate={onContentProcessDidTerminate}
-        injectedJavaScript={injectedJavaScript}
-        injectedJavaScriptBeforeContentLoaded={injectedJavaScriptBeforeContentLoaded}
+        injectedJavaScript={bridge.script + (injectedJavaScript || '')}
+        injectedJavaScriptBeforeContentLoaded={
+          bridge.script + (injectedJavaScriptBeforeContentLoaded || '')
+        }
         injectedJavaScriptObject={JSON.stringify(injectedJavaScriptObject)}
         allowsAirPlayForMediaPlayback={allowsAirPlayForMediaPlayback}
         allowsInlineMediaPlayback={allowsInlineMediaPlayback}
