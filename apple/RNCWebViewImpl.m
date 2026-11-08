@@ -17,6 +17,34 @@
 
 #import "objc/runtime.h"
 
+#if TARGET_OS_IOS
+@interface _WKFeature : NSObject
+@property (nonatomic, readonly) NSString *key;
+@end
+
+@interface WKPreferences (RNCMediaSourcePreferences)
++ (NSArray<_WKFeature *> *)_features;
+- (void)_setEnabled:(BOOL)enabled forFeature:(_WKFeature *)feature;
+@end
+
+static BOOL RNCDisableMediaSourceDecompressionSession(WKPreferences *preferences)
+{
+  if (![WKPreferences respondsToSelector:@selector(_features)] ||
+      ![preferences respondsToSelector:@selector(_setEnabled:forFeature:)]) {
+    return NO;
+  }
+
+  for (_WKFeature *feature in [WKPreferences _features]) {
+    if ([feature.key isEqualToString:@"MediaSourcePrefersDecompressionSession"]) {
+      [preferences _setEnabled:NO forFeature:feature];
+      return YES;
+    }
+  }
+
+  return NO;
+}
+#endif
+
 static NSTimer *keyboardTimer;
 static NSString *const HistoryShimName = @"ReactNativeHistoryShim";
 static NSString *const MessageHandlerName = @"ReactNativeWebView";
@@ -417,6 +445,11 @@ RCTAutoInsetsProtocol>
   WKWebViewConfiguration *wkWebViewConfig = [WKWebViewConfiguration new];
   WKPreferences *prefs = [[WKPreferences alloc]init];
   BOOL _prefsUsed = NO;
+#if TARGET_OS_IOS
+  if (_disableMediaSourceDecompressionSession) {
+    _prefsUsed = RNCDisableMediaSourceDecompressionSession(prefs);
+  }
+#endif
   if (!_javaScriptEnabled) {
     prefs.javaScriptEnabled = NO;
     _prefsUsed = YES;

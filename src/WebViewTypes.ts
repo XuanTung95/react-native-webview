@@ -384,6 +384,11 @@ export interface WindowsWebViewProps extends WebViewSharedProps {
 
 export interface IOSWebViewProps extends WebViewSharedProps {
   /**
+   * Disables WebKit's MediaSource decompression session preference when supported.
+   * Defaults to false. Set before mounting the WebView.
+   */
+  disableMediaSourceDecompressionSession?: boolean;
+  /**
    * Does not store any data within the lifetime of the WebView.
    */
   incognito?: boolean;

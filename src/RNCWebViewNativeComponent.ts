@@ -167,6 +167,7 @@ export interface NativeProps extends ViewProps {
   allowingReadAccessToURL?: string;
   allowsBackForwardNavigationGestures?: boolean;
   allowsInlineMediaPlayback?: boolean;
+  disableMediaSourceDecompressionSession?: boolean;
   allowsPictureInPictureMediaPlayback?: boolean;
   allowsAirPlayForMediaPlayback?: boolean;
   allowsLinkPreview?: WithDefault<boolean, true>;

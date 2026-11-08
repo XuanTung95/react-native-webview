@@ -74,6 +74,7 @@ const WebViewComponent = forwardRef<unknown, IOSWebViewProps>(
       source,
       nativeConfig,
       allowsInlineMediaPlayback,
+      disableMediaSourceDecompressionSession,
       allowsPictureInPictureMediaPlayback = true,
       allowsAirPlayForMediaPlayback,
       mediaPlaybackRequiresUserAction,
@@ -154,6 +155,10 @@ const WebViewComponent = forwardRef<unknown, IOSWebViewProps>(
     );
 
     useWarnIfChanges(allowsInlineMediaPlayback, 'allowsInlineMediaPlayback');
+    useWarnIfChanges(
+      disableMediaSourceDecompressionSession,
+      'disableMediaSourceDecompressionSession',
+    );
     useWarnIfChanges(allowsPictureInPictureMediaPlayback, 'allowsPictureInPictureMediaPlayback');
     useWarnIfChanges(allowsAirPlayForMediaPlayback, 'allowsAirPlayForMediaPlayback');
     useWarnIfChanges(incognito, 'incognito');
@@ -243,6 +248,7 @@ const WebViewComponent = forwardRef<unknown, IOSWebViewProps>(
         }
         allowsAirPlayForMediaPlayback={allowsAirPlayForMediaPlayback}
         allowsInlineMediaPlayback={allowsInlineMediaPlayback}
+        disableMediaSourceDecompressionSession={disableMediaSourceDecompressionSession}
         allowsPictureInPictureMediaPlayback={allowsPictureInPictureMediaPlayback}
         incognito={incognito}
         mediaPlaybackRequiresUserAction={mediaPlaybackRequiresUserAction}

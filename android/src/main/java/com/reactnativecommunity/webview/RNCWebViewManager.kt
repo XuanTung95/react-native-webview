@@ -672,6 +672,7 @@ open class RNCWebViewManager : ViewGroupManager<RNCWebViewWrapper>(),
     override fun setAllowsBackForwardNavigationGestures(view: RNCWebViewWrapper, value: Boolean) {}
 
     override fun setAllowsInlineMediaPlayback(view: RNCWebViewWrapper, value: Boolean) {}
+    override fun setDisableMediaSourceDecompressionSession(view: RNCWebViewWrapper, value: Boolean) {}
 
     override fun setAllowsPictureInPictureMediaPlayback(view: RNCWebViewWrapper, value: Boolean) {}
 

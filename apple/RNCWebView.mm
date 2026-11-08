@@ -296,6 +296,7 @@ static inline std::string nullSafeStringWithLength(id value) {
     REMAP_WEBVIEW_PROP(allowFileAccessFromFileURLs)
     REMAP_WEBVIEW_PROP(allowUniversalAccessFromFileURLs)
     REMAP_WEBVIEW_PROP(allowsInlineMediaPlayback)
+    REMAP_WEBVIEW_PROP(disableMediaSourceDecompressionSession)
     REMAP_WEBVIEW_PROP(allowsPictureInPictureMediaPlayback)
     REMAP_WEBVIEW_PROP(webviewDebuggingEnabled)
     REMAP_WEBVIEW_PROP(allowsAirPlayForMediaPlayback)
